@@ -14,11 +14,38 @@
 #define ESP_WIFI_SSID      "WiFi_Protocol"
 #define ESP_WIFI_CHANNEL   1
 #define MAX_STA_CONN       10
+#define GPIO_BUTTON_PIN    23
 
 static const char *TAG = "wifi softAP";
 
 static bool is_password_set = false;
 static char user_set_password[64] = {0};
+
+// GPIO handler
+static void button_task(void *pvParameters) {
+    while (1) {
+        if (gpio_get_level(GPIO_BUTTON_PIN) == 0) {  // Nút được nhấn
+            ESP_LOGI(TAG, "Button pressed. Deleting NVS data...");
+
+            // Xoá dữ liệu từ NVS
+            nvs_handle_t my_nvs_handle;
+            ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &my_nvs_handle));
+
+            ESP_ERROR_CHECK(nvs_erase_all(my_nvs_handle));
+
+            nvs_close(my_nvs_handle);
+
+            ESP_LOGI(TAG, "NVS data deleted.");
+
+            // Thực hiện reset ESP32
+            ESP_LOGI(TAG, "Resetting ESP32...");
+            esp_restart();
+        }
+
+        vTaskDelay(10 / portTICK_PERIOD_MS);  // Ngủ 10ms để giảm tải CPU
+    }
+}
+
 
 // Wi-Fi events
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
@@ -57,6 +84,46 @@ static esp_err_t root_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Hàm lưu mật khẩu vào NVS Flash
+void save_password_to_nvs(const char* password, nvs_handle_t nvs_handle) {
+    esp_err_t err = nvs_set_str(nvs_handle, "password", password);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error setting password in NVS");
+    }
+}
+
+// Hàm đọc mật khẩu từ NVS Flash
+void read_password_from_nvs(char* password, nvs_handle_t nvs_handle) {
+    size_t required_size;
+    esp_err_t err = nvs_get_str(nvs_handle, "password", NULL, &required_size);
+    if (err == ESP_OK) {
+        if (required_size <= sizeof(user_set_password)) {
+            err = nvs_get_str(nvs_handle, "password", password, &required_size);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Error reading password from NVS");
+            }
+        } else {
+            ESP_LOGE(TAG, "Password size mismatch in NVS");
+        }
+    }
+}
+
+// Hàm lưu sự kiện is_password_set vào NVS Flash
+void save_is_password_set_to_nvs(bool is_set, nvs_handle_t nvs_handle) {
+    esp_err_t err = nvs_set_u8(nvs_handle, "is_password_set", is_set);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error setting is_password_set in NVS");
+    }
+}
+
+// Hàm đọc sự kiện is_password_set từ NVS Flash
+void read_is_password_set_from_nvs(bool* is_set, nvs_handle_t nvs_handle) {
+    esp_err_t err = nvs_get_u8(nvs_handle, "is_password_set", (uint8_t*)is_set);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error reading is_password_set from NVS");
+    }
+}
+
 // HTTP handler cho set_password
 static esp_err_t set_password_handler(httpd_req_t *req) {
     char buf[64];
@@ -65,18 +132,36 @@ static esp_err_t set_password_handler(httpd_req_t *req) {
 
     int long_pass = strlen(buf);
 
-    if (long_pass > 12) {             //true 9
+    if (long_pass > 12) {
         ESP_LOGI(TAG, "Received password: %s", buf);
-        strncpy(user_set_password, buf, sizeof(user_set_password));
-        is_password_set = true;
-        ESP_LOGI(TAG, "is_password_set is now true");
+        if (!is_password_set) {
+            nvs_handle_t my_nvs_handle;  // Tạo một biến nvs_handle mới
+            ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &my_nvs_handle));
 
+            // Lưu mật khẩu vào NVS chỉ nếu nó chưa được đặt
+            strncpy(user_set_password, buf, sizeof(user_set_password));
+            is_password_set = true;
+            ESP_LOGI(TAG, "is_password_set is now true");
+            
+            // Lưu mật khẩu vào NVS Flash
+            save_password_to_nvs(user_set_password, my_nvs_handle);
+            
+            // Lưu sự kiện is_password_set vào NVS Flash
+            save_is_password_set_to_nvs(is_password_set, my_nvs_handle);
+
+            // Đóng NVS Handle
+            nvs_close(my_nvs_handle);
+
+            // Khởi động lại tự động sau khi đặt mật khẩu
+            esp_restart();
+        }
     }
 
     const char *resp = "Password has been set successfully!";
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
+
 
 // Ca hinh root URI handler
 static httpd_uri_t root_uri = {
@@ -98,7 +183,8 @@ static httpd_uri_t set_password_uri = {
 static httpd_config_t httpd_config = HTTPD_DEFAULT_CONFIG();
 
 // Khoi tao  Wi-Fi access point va  HTTP server
-static void wifi_init_softap(void) {
+static void wifi_init_softap(nvs_handle_t nvs_handle) {
+    // Khoi tao WiFi voi cau hinh mac dinh
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_ap();
@@ -123,7 +209,13 @@ static void wifi_init_softap(void) {
 
     ESP_LOGI(TAG, "Before Wi-Fi config: is_password_set=%s", is_password_set ? "true" : "false");
 
+    // Đọc giá trị của is_password_set từ NVS Flash
+    read_is_password_set_from_nvs(&is_password_set, nvs_handle);
+
     if (is_password_set) {
+        // Đọc mật khẩu từ NVS Flash
+        read_password_from_nvs(user_set_password, nvs_handle);
+
         wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
         strncpy((char*)wifi_config.ap.password, user_set_password, sizeof(wifi_config.ap.password));
     } else {
@@ -135,10 +227,10 @@ static void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    httpd_handle_t server;
-    ESP_ERROR_CHECK(httpd_start(&server, &httpd_config));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &root_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &set_password_uri));
+        httpd_handle_t server;  
+        ESP_ERROR_CHECK(httpd_start(&server, &httpd_config));
+        ESP_ERROR_CHECK(httpd_register_uri_handler(server, &root_uri));
+        ESP_ERROR_CHECK(httpd_register_uri_handler(server, &set_password_uri));
 
     ESP_LOGI(TAG, "After Wi-Fi config: is_password_set=%s", is_password_set ? "true" : "false");
     ESP_LOGI(TAG, "wifi_init_softap completed. SSID:%s password:%s channel:%d",
@@ -153,6 +245,23 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
+    nvs_handle_t my_nvs_handle;
+    ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &my_nvs_handle));
+
+    // Cấu hình GPIO cho nút nhấn
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << GPIO_BUTTON_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .intr_type = GPIO_PIN_INTR_DISABLE,  // Chế độ ngắt không được sử dụng
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    // Tạo một task để theo dõi trạng thái của nút nhấn
+    xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
+
     ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
-    wifi_init_softap();
+    wifi_init_softap(my_nvs_handle);
 }
