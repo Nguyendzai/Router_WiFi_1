@@ -20,7 +20,7 @@ static const char *TAG = "wifi softAP";
 static bool is_password_set = false;
 static char user_set_password[64] = {0};
 
-// Event handler for Wi-Fi events
+// Wi-Fi events
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data) {
     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
@@ -39,7 +39,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-// HTTP handler for root page
+// HTTP handler cho root
 static esp_err_t root_handler(httpd_req_t *req) {
     const char *html;
     if (is_password_set) {
@@ -57,7 +57,7 @@ static esp_err_t root_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// HTTP handler for setting the password
+// HTTP handler cho set_password
 static esp_err_t set_password_handler(httpd_req_t *req) {
     char buf[64];
     int ret = httpd_req_recv(req, buf, sizeof(buf));
@@ -78,7 +78,7 @@ static esp_err_t set_password_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Configuration for the root URI handler
+// Ca hinh root URI handler
 static httpd_uri_t root_uri = {
     .uri       = "/",
     .method    = HTTP_GET,
@@ -86,7 +86,7 @@ static httpd_uri_t root_uri = {
     .user_ctx  = NULL
 };
 
-// Configuration for the set_password URI handler
+// Cau hinh set_password URI handler
 static httpd_uri_t set_password_uri = {
     .uri       = "/set_password",
     .method    = HTTP_POST,
@@ -94,10 +94,10 @@ static httpd_uri_t set_password_uri = {
     .user_ctx  = NULL
 };
 
-// Configuration for the HTTP server
+// Cau hinh HTTP server
 static httpd_config_t httpd_config = HTTPD_DEFAULT_CONFIG();
 
-// Initialization of the Wi-Fi access point and HTTP server
+// Khoi tao  Wi-Fi access point va  HTTP server
 static void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -145,7 +145,6 @@ static void wifi_init_softap(void) {
              ESP_WIFI_SSID, wifi_config.ap.password, ESP_WIFI_CHANNEL);
 }
 
-// Main function (app_main)
 void app_main(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
