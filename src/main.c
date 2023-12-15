@@ -127,19 +127,21 @@ void read_is_password_set_from_nvs(bool* is_set, nvs_handle_t nvs_handle) {
 // HTTP handler cho set_password
 static esp_err_t set_password_handler(httpd_req_t *req) {
     char buf[64];
+    char pass[64];
     int ret = httpd_req_recv(req, buf, sizeof(buf));
     buf[ret] = '\0';
+    strcpy(pass, buf + 9);
 
-    int long_pass = strlen(buf);
+    int long_pass = strlen(pass);
 
-    if (long_pass > 12) {
-        ESP_LOGI(TAG, "Received password: %s", buf);
+    if (long_pass > 0) {
+        ESP_LOGI(TAG, "Received password: %s", pass);
         if (!is_password_set) {
             nvs_handle_t my_nvs_handle;  // Tạo một biến nvs_handle mới
             ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &my_nvs_handle));
 
             // Lưu mật khẩu vào NVS chỉ nếu nó chưa được đặt
-            strncpy(user_set_password, buf, sizeof(user_set_password));
+            strncpy(user_set_password, pass, sizeof(user_set_password));
             is_password_set = true;
             ESP_LOGI(TAG, "is_password_set is now true");
             
