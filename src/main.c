@@ -15,7 +15,7 @@
 #define ESP_WIFI_CHANNEL   1
 #define MAX_STA_CONN       10
 #define GPIO_BUTTON_PIN    23
-#define LED_GPIO_PIN  22
+#define LED_GPIO_PIN       22
 
 static const char *TAG = "wifi softAP";
 
